@@ -21,6 +21,7 @@ import tomopy
 import smtplib
 import time
 import os
+import tifffile as tf
 
 from matplotlib import animation, rc, colors
 from matplotlib.widgets import Slider
@@ -28,150 +29,112 @@ from matplotlib.widgets import Slider
 
 # ----------------------------- Class TomoData -------------------------#
 
-
 class TomoData:
     def __init__(
         self,
-        prjImgs=None,
+        prj_imgs=None,
         numX=None,
         numY=None,
-        numTheta=None,
+        num_theta=None,
         filename=None,
-        raw="Yes",
         theta=None,
         angleStart=-90,
         angleEnd=90,
         cbarRange=[0, 1],
-        verboseImport="No",
-        rotate="Y",
-        correctionOptions=dict(),
+        verbose_import=False,
+        #rotate="Y",
+        metadata=None
+        #correctionOptions=dict(),
     ):
-        self.prjImgs = prjImgs
+
+        self.prj_imgs = prj_imgs
         self.numX = numX
         self.numY = numY
-        self.numTheta = numTheta
+        self.num_theta = num_theta
         self.theta = theta
-        self.verboseImport = verboseImport
+        self.verbose_import = verbose_import
         self.filename = filename
-        logging.getLogger("dxchange").setLevel(logging.WARNING)
-        if filename is not None and numTheta is None and rotate == "Y":
-            self = self.importAndRotateTiff(filename)
-        elif rotate == "N" and numTheta == None:
-            self = self.importTiff(filename)
-        if filename is not None and numTheta is not None and rotate == "Y":
-            self = self.importAndRotateTiffStack(filename, numTheta=numTheta)
-        elif rotate == "N" and numTheta is not None:
-            self = self.importTiffStack(filename, numTheta=numTheta)
-        if raw is not "Yes":
-            self.numTheta, self.numY, self.numX = self.prjImgs.shape
-        if self.theta == None and self.numTheta is not None:
-            self.theta = tomopy.angles(self.numTheta, angleStart, angleEnd)
+        self.metadata = metadata
         self.cbarRange = cbarRange
+
+        if self.verbose_import == True:
+            logging.getLogger("dxchange").setLevel(logging.INFO)
+        else:
+            logging.getLogger("dxchange").setLevel(logging.WARNING)
+
+        if self.metadata is not None and self.prj_imgs is None:
+            if metadata['imgtype'] == 'tiff':
+                self = self.import_tiff(filename)
+            if metadata['imgtype'] == 'tiffstack':
+                self = self.import_tiff_stack(filename)
+
+        elif self.prj_imgs is not None:
+            self.num_theta, self.numY, self.numX = self.prj_imgs.shape
+
+        if self.theta == None and self.num_theta is not None:
+            self.theta = tomopy.angles(self.num_theta, angleStart, angleEnd)
+
+        if self.prj_imgs is None:
+            logging.warning('This did not import.')
+
 
     # --------------------------Import Functions--------------------------#
 
-    def importTiff(self, filename):
+    def import_tiff(self):
         """
-        Import tiff and create TomoData object.
-
-        Parameters
-        ----------
-        filename : str
-            Relative or absolute
+        Import tiff and create TomoData object based on option_dict.
 
         Returns
         -------
         self : TomoData
         """
-        print(filename)
-        if self.verboseImport == "Y" or self.verboseImport == "Yes":
-            logging.getLogger("dxchange").setLevel(logging.INFO)
-        prjImgs = dxchange.reader.read_tiff(filename)
-        self.prjImgs = prjImgs.astype(np.float32)
-        if len(self.prjImgs.shape) == 2:
-            print("this only has two dimensions")
-            self.prjImgs = self.prjImgs[np.newaxis, :, :]
-        if len(prjImgs.shape) == 3:
-            self.numTheta, self.numY, self.numX = prjImgs.shape
+        # navigates to path selected. User may pick a file instead of a folder.
+        os.chdir(self.metadata['fpath'])
+        self.prj_imgs = dxchange.reader.read_tiff(
+            self.metadata['fname']
+            ).astype(np.float32)
+        if self.prj_imgs.ndim == 2:
+            self.prj_imgs = self.prj_imgs[np.newaxis, :, :]
+        # this will rotate it 90 degrees. Can update to rotate it multiple 
+        # times.
+        if self.metadata['opts']['rotate'] == True:
+            self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
+            self.prj_imgs = np.flip(self.prj_imgs, 2)
         return self
 
-    def importAndRotateTiff(self, filename):
-        """
-        Import tiff and create TomoData object,
-        and rotate it 90 degrees clockwise.
-
-        Parameters
-        ----------
-        filename : str
-            Relative or absolute
-
-        Returns
-        -------
-        self : TomoData
-        """
-        if self.verboseImport == "Y" or self.verboseImport == "Yes":
-            logging.getLogger("dxchange").setLevel(logging.INFO)
-        self.prjImgs = dxchange.reader.read_tiff(filename)
-        self.prjImgs = np.swapaxes(prjImgs, 1, 2)
-        self.prjImgs = np.flip(prjImgs, 2)
-        self.prjImgs = prjImgs.astype(np.float32)
-        if len(self.prjImgs.shape) == 2:
-            self.prjImgs = self.prjImgs[np.newaxis, :, :]
-        if len(prjImgs.shape) == 3:
-            self.numTheta, self.numY, self.numX = prjImgs.shape
-        return self
-
-    def importTiffStack(self, filename, numTheta=None):
+    def import_tiff_stack(self, filename, num_theta=None):
         """
         Import tiff stack (lots of files in one folder).
-        TODO: remove requirement to take numTheta as an argument
 
         Parameters
         ----------
         filename : str of first file
             Typically 0000, relative or absolute
-        numTheta: int, required
+        num_theta: int, required
             Total number of projection images taken.
         Returns
         -------
         self : TomoData
         """
-        if self.verboseImport == "Y" or self.verboseImport == "Yes":
-            logging.getLogger("dxchange").setLevel(logging.INFO)
-        prjImgs = dxchange.reader.read_tiff_stack(filename, list(range(self.numTheta)))
-        prjImgs = prjImgs.astype(np.float32)
-        if len(self.prjImgs.shape) == 2:
-            self.prjImgs = self.prjImgs[np.newaxis, :, :]
-        self.prjImgs = prjImgs
-        self.numTheta, self.numY, self.numX = prjImgs.shape
-        return self
+        # navigates to path selected. User may pick a file instead of a folder.
+        # This should not matter, it ignores that. 
+        os.chdir(self.metadata['fpath'])
+        # Using tiffsequence instead of dxchange. dxchange.read_tiff_stack 
+        # does not do a good job finding files if they do not have a number
+        # at the end.
 
-    def importAndRotateTiffStack(self, filename, numTheta=None):
-        """
-        Import tiff stack (lots of files in one folder) and rotate it 90
-        degrees clockwise.
-        TODO: remove requirement to take numTheta as an argument
+        image_sequence = tf.TiffSequence(r'\*.tif')
+        self.num_theta = len(image_sequence.files)
+        self.prj_imgsdata = image_sequence.asarray().astype(np.float32)
+        image_sequence.close()
 
-        Parameters
-        ----------
-        filename : str of first file
-            Typically 0000, relative or absolute
-        numTheta: int, required
+        # rotate dataset 90 deg if wanted
+        if self.metadata['opts']['rotate'] == True:
+            self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
+            self.prj_imgs = np.flip(self.prj_imgs, 2)
 
-        Returns
-        -------
-        self : TomoData
-        """
-        if self.verboseImport == "Y" or self.verboseImport == "Yes":
-            logging.getLogger("dxchange").setLevel(logging.INFO)
-        prjImgs = dxchange.reader.read_tiff_stack(filename, list(range(self.numTheta)))
-        prjImgs = np.swapaxes(prjImgs, 1, 2)
-        prjImgs = np.flip(prjImgs, 2)
-        prjImgs = prjImgs.astype(np.float32)
-        if len(self.prjImgs.shape) == 2:
-            self.prjImgs = self.prjImgs[np.newaxis, :, :]
-        self.prjImgs = prjImgs
-        self.numTheta, self.numY, self.numX = prjImgs.shape
+        #prj_imgs = dxchange.reader.read_tiff_stack(filename, list(range(self.num_theta)))
+        #prj_imgs = prj_imgs.astype(np.float32)
         return self
 
     # --------------------------Plotting Functions----------------------#
@@ -202,8 +165,8 @@ class TomoData:
         """
         fig, ax = plt.subplots(figsize=figSize)
         plt.subplots_adjust(left=0.25, bottom=0.3)
-        if len(self.prjImgs.shape) == 3:
-            imgData = self.prjImgs[projectionNo, :, :]
+        if len(self.prj_imgs.shape) == 3:
+            imgData = self.prj_imgs[projectionNo, :, :]
         plotImage = ax.imshow(imgData, cmap=cmap)
         cbar = plt.colorbar(plotImage)
         if cmapRange == None:
@@ -256,8 +219,8 @@ class TomoData:
         """
         fig, ax = plt.subplots(figsize=figSize)
         plt.subplots_adjust(left=0.25, bottom=0.3)
-        if len(self.prjImgs.shape) == 3:
-            imgData = self.prjImgs[:, sinogramNo, :]
+        if len(self.prj_imgs.shape) == 3:
+            imgData = self.prj_imgs[:, sinogramNo, :]
         plotImage = ax.imshow(imgData, cmap=cmap)
         cbar = plt.colorbar(plotImage)
         if cmapRange == None:
@@ -313,14 +276,14 @@ class TomoData:
         """
         frames = []
         if endNo == None:
-            endNo = self.numTheta
+            endNo = self.num_theta
         animSliceNos = range(startNo, endNo, skipFrames)
         fig, ax = plt.subplots(figsize=figSize)
         for i in animSliceNos:
             frames.append(
                 [
                     ax.imshow(
-                        self.prjImgs[i, :, :],
+                        self.prj_imgs[i, :, :],
                         cmap="viridis",
                         vmin=self.cbarRange[0],
                         vmax=self.cbarRange[1],
@@ -337,14 +300,14 @@ class TomoData:
 
     def writeTiff(self, fname):
         """
-        Writes prjImgs attribute to file.
+        Writes prj_imgs attribute to file.
 
         Parameters
         ----------
         filename : str, relative or absolute filepath.
 
         """
-        dxchange.write_tiff(self.prjImgs, fname=fname)
+        dxchange.write_tiff(self.prj_imgs, fname=fname)
 
     # --------------------------Correction Functions--------------------------#
 
@@ -397,13 +360,13 @@ class TomoData:
         for key in options:
             if key == "remove_all_stripe":
                 print("Performing ALL stripe removal.")
-                self.prjImgs = tomopy.prep.stripe.remove_all_stripe(
-                    self.prjImgs, **options[key]
+                self.prj_imgs = tomopy.prep.stripe.remove_all_stripe(
+                    self.prj_imgs, **options[key]
                 )
             if key == "remove_large_stripe":
                 print("Performing LARGE stripe removal.")
-                self.prjImgs = tomopy.prep.stripe.remove_large_stripe(
-                    self.prjImgs, **options[key]
+                self.prj_imgs = tomopy.prep.stripe.remove_large_stripe(
+                    self.prj_imgs, **options[key]
                 )
         self.correctionOptions = options
         return self
@@ -429,17 +392,17 @@ def normalize(tomo, flat, dark, rmZerosAndNans=True):
     tomoNormMLog : TomoData
         Normalized + -log() data in TomoData object
     """
-    tomoNormPrjImgs = tomopy.normalize(
-        tomo.prjImgs, flat.prjImgs, dark.prjImgs
+    tomoNormprj_imgs = tomopy.normalize(
+        tomo.prj_imgs, flat.prj_imgs, dark.prj_imgs
     )
-    tomoNorm = TomoData(prjImgs=tomoNormPrjImgs, raw="No")
-    tomoNormMLogPrjImgs = tomopy.minus_log(tomoNormPrjImgs)
-    tomoNormMLog = TomoData(prjImgs=tomoNormMLogPrjImgs, raw="No")
+    tomoNorm = TomoData(prj_imgs=tomoNormprj_imgs, raw="No")
+    tomoNormMLogprj_imgs = tomopy.minus_log(tomoNormprj_imgs)
+    tomoNormMLog = TomoData(prj_imgs=tomoNormMLogprj_imgs, raw="No")
     if rmZerosAndNans == True:
-        tomoNormMLog.prjImgs = tomopy.misc.corr.remove_nan(
-            tomoNormMLog.prjImgs, val=0.0
+        tomoNormMLog.prj_imgs = tomopy.misc.corr.remove_nan(
+            tomoNormMLog.prj_imgs, val=0.0
         )
-        tomoNormMLog.prjImgs[tomoNormMLog.prjImgs == np.inf] = 0
+        tomoNormMLog.prj_imgs[tomoNormMLog.prj_imgs == np.inf] = 0
     return tomoNorm, tomoNormMLog
 
 
@@ -541,21 +504,21 @@ class Recon:
         tic = time.perf_counter()
         if self.prjRangeX == None and self.prjRangeY == None:
             self.recon = tomopy.recon(
-                self.tomo.prjImgs,
+                self.tomo.prj_imgs,
                 self.tomo.theta,
                 algorithm=tomopy.astra,
                 options=options,
             )
         elif self.prjRangeX == None and self.prjRangeY is not None:
             self.recon = tomopy.recon(
-                self.tomo.prjImgs[:, self.prjRangeY[0] : self.prjRangeY[1] : 1, :],
+                self.tomo.prj_imgs[:, self.prjRangeY[0] : self.prjRangeY[1] : 1, :],
                 self.tomo.theta,
                 algorithm=tomopy.astra,
                 options=options,
             )
         elif self.prjRangeX is not None and self.prjRangeY is not None:
             self.recon = tomopy.recon(
-                self.tomo.prjImgs[:, self.prjRangeY[0] : self.prjRangeY[1] : 1, self.prjRangeX[0] : self.prjRangeX[1] : 1],
+                self.tomo.prj_imgs[:, self.prjRangeY[0] : self.prjRangeY[1] : 1, self.prjRangeX[0] : self.prjRangeX[1] : 1],
                 self.tomo.theta,
                 algorithm=tomopy.astra,
                 options=options,
@@ -621,7 +584,7 @@ class Recon:
             print("Extra options: " + str(options["extra_options"]))
         tic = time.perf_counter()
         prj, self.sx, self.sy, conv, center, sim, self.recon = tomopy.prep.alignment.align_joint_astra_cupy2(
-            self.tomo.prjImgs, 
+            self.tomo.prj_imgs, 
             self.tomo.theta,         
             pad=options["pad"], 
             iters=options["iters_alignment"],
@@ -680,7 +643,7 @@ class Recon:
         os.environ["TOMOPY_PYTHON_THREADS"] = "40"
         tic = time.perf_counter()
         self.recon = tomopy.recon(
-            self.tomo.prjImgs[:, self.prjRange[0] : self.prjRange[-1] : 1, :],
+            self.tomo.prj_imgs[:, self.prjRange[0] : self.prjRange[-1] : 1, :],
             self.tomo.theta,
             ncore=40,
             **options,
