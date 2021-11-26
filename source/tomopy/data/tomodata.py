@@ -411,47 +411,36 @@ class TomoData:
 
 ############################# TomoDataCombined #############################
 
-
-class TomoDataCombined:
+def normalize(tomo, flat, dark, rmZerosAndNans=True):
     """
-    Combines tomodata to normalize it. TODO: make this a function under 
-    TomoData.
+    Normalizes the data with typical options for normalization. TODO: Needs
+    more options. 
+    TODO: add option to delete the previous objects from memory.
+
+    Parameters
+    ----------
+    rmZerosAndNans : bool
+        Remove the zeros and nans from normalized data.
+
+    Returns
+    -------
+    tomoNorm : TomoData
+        Normalized data in TomoData object
+    tomoNormMLog : TomoData
+        Normalized + -log() data in TomoData object
     """
-    def __init__(self, tomo, flat, dark):
-        self.tomo = tomo
-        self.flat = flat
-        self.dark = dark
-
-    def normalize(self, rmZerosAndNans=True):
-        """
-        Normalizes the data with typical options for normalization. TODO: Needs
-        more options. 
-        TODO: add option to delete the previous objects from memory.
-
-        Parameters
-        ----------
-        rmZerosAndNans : bool
-            Remove the zeros and nans from normalized data.
-
-        Returns
-        -------
-        tomoNorm : TomoData
-            Normalized data in TomoData object
-        tomoNormMLog : TomoData
-            Normalized + -log() data in TomoData object
-        """
-        tomoNormPrjImgs = tomopy.normalize(
-            self.tomo.prjImgs, self.flat.prjImgs, self.dark.prjImgs
+    tomoNormPrjImgs = tomopy.normalize(
+        tomo.prjImgs, flat.prjImgs, dark.prjImgs
+    )
+    tomoNorm = TomoData(prjImgs=tomoNormPrjImgs, raw="No")
+    tomoNormMLogPrjImgs = tomopy.minus_log(tomoNormPrjImgs)
+    tomoNormMLog = TomoData(prjImgs=tomoNormMLogPrjImgs, raw="No")
+    if rmZerosAndNans == True:
+        tomoNormMLog.prjImgs = tomopy.misc.corr.remove_nan(
+            tomoNormMLog.prjImgs, val=0.0
         )
-        tomoNorm = TomoData(prjImgs=tomoNormPrjImgs, raw="No")
-        tomoNormMLogPrjImgs = tomopy.minus_log(tomoNormPrjImgs)
-        tomoNormMLog = TomoData(prjImgs=tomoNormMLogPrjImgs, raw="No")
-        if rmZerosAndNans == True:
-            tomoNormMLog.prjImgs = tomopy.misc.corr.remove_nan(
-                tomoNormMLog.prjImgs, val=0.0
-            )
-            tomoNormMLog.prjImgs[tomoNormMLog.prjImgs == np.inf] = 0
-        return tomoNorm, tomoNormMLog
+        tomoNormMLog.prjImgs[tomoNormMLog.prjImgs == np.inf] = 0
+    return tomoNorm, tomoNormMLog
 
 
 ################################### Recon ###################################
