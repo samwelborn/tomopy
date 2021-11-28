@@ -38,8 +38,6 @@ class TomoData:
         num_theta=None,
         filename=None,
         theta=None,
-        angleStart=-90,
-        angleEnd=90,
         cbarRange=[0, 1],
         verbose_import=False,
         #rotate="Y",
@@ -68,11 +66,14 @@ class TomoData:
             if metadata['imgtype'] == 'tiff stack':
                 self = self.import_tiff_stack(filename)
 
-        elif self.prj_imgs is not None:
+        if self.prj_imgs is not None:
             self.num_theta, self.numY, self.numX = self.prj_imgs.shape
-
-        if self.theta == None and self.num_theta is not None:
-            self.theta = tomopy.angles(self.num_theta, angleStart, angleEnd)
+        # can probably fix this later to rely on user input. Right now user 
+        # input is only for storing metadata, maybe better that way.
+        if self.theta is None and self.num_theta is not None:
+            self.theta = tomopy.angles(self.num_theta, 
+                self.metadata['start_angle'],
+                self.metadata['end_angle'])
 
         if self.prj_imgs is None:
             logging.warning('This did not import.')
@@ -123,9 +124,9 @@ class TomoData:
         # does not do a good job finding files if they do not have a number
         # at the end.
 
-        image_sequence = tf.TiffSequence(r'\*.tif')
+        image_sequence = tf.TiffSequence()
         self.num_theta = len(image_sequence.files)
-        self.prj_imgsdata = image_sequence.asarray().astype(np.float32)
+        self.prj_imgs = image_sequence.asarray().astype(np.float32)
         image_sequence.close()
 
         # rotate dataset 90 deg if wanted
