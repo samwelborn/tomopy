@@ -55,6 +55,7 @@ import os
 import astra
 import cupy as cp
 
+from tqdm.notebook import trange, tqdm
 from joblib import Parallel, delayed
 from time import process_time, perf_counter, sleep
 from skimage import transform as tf
@@ -479,7 +480,7 @@ def align_joint_astra_cupy2(
     extra_kwargs = {}
 
     # Register each image frame-by-frame.
-    for n in range(iters):
+    for n in trange(iters):
         print(
             "---------------------------------------------------------------"
         )
@@ -512,7 +513,7 @@ def align_joint_astra_cupy2(
         rec = np.array_split(rec, batchsize, axis=0)
         shift_cpu = []
         sim = []
-        for i in range(len(rec)):
+        for i in trange(len(rec)):
             _rec = rec[i]   
             vol_geom = astra.create_vol_geom(
                 _rec.shape[1], _rec.shape[1], _rec.shape[0]
@@ -547,14 +548,12 @@ def align_joint_astra_cupy2(
 
         # Cut the data up into batchsize (along projection axis) so that the GPU can handle it.
         # This number will change depending on your GPU memory.
-        print(type(prj))
         _prj = np.array_split(_prj, batchsize, axis=0)
-        print(type(prj))
         _sim = np.array_split(_sim, batchsize, axis=0)
         shift_cpu = []
         print('Starting image registration.')
         # tic = perf_counter()
-        for i in range(len(_prj)):
+        for i in trange(len(_prj)):
             shift_gpu = phase_cross_correlation(
                 _prj[i], _sim[i], upsample_factor=1, return_error=False
             )
