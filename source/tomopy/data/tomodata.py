@@ -65,7 +65,7 @@ class TomoData:
         if self.metadata is not None and self.prj_imgs is None:
             if metadata['imgtype'] == 'tiff':
                 self = self.import_tiff(filename)
-            if metadata['imgtype'] == 'tiffstack':
+            if metadata['imgtype'] == 'tiff stack':
                 self = self.import_tiff_stack(filename)
 
         elif self.prj_imgs is not None:
