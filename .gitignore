@@ -156,3 +156,7 @@ script
 /CMakeFiles
 /test_rotate.py
 *.lib
+*.json
+*.npy
+*.tif
+doc/demo/*

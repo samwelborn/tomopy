@@ -47,33 +47,38 @@ def _upsampled_dft(data, upsampled_region_size,
     output : ndarray
             The upsampled DFT of the specified region.
     """
+    fft.set_global_backend(cufft)
+
     # if people pass in an integer, expand it to a list of equal-sized sections
     if not hasattr(upsampled_region_size, "__iter__"):
         upsampled_region_size = [upsampled_region_size, ] * data.ndim
+        upsampled_region_size = cp.asarray(upsampled_region_size, dtype=cp.float64)
     else:
         if len(upsampled_region_size) != data.ndim:
             raise ValueError("shape of upsampled region sizes must be equal "
                              "to input data's number of dimensions.")
-
     if axis_offsets is None:
         axis_offsets = [0, ] * data.ndim
     else:
         if len(axis_offsets) != data.ndim:
             raise ValueError("number of axis offsets must be equal to input "
                              "data's number of dimensions.")
-
+    # axis_offsets = cp.asarray(axis_offsets)
     im2pi = 1j * 2 * np.pi
-
+    # upsampled_region_size = cp.asarray(upsampled_region_size)
     dim_properties = list(zip(data.shape, upsampled_region_size, axis_offsets))
 
     for (n_items, ups_size, ax_offset) in dim_properties[::-1]:
-        kernel = ((np.arange(ups_size) - ax_offset)[:, None]
-                  * fft.fftfreq(n_items, upsample_factor))
-        kernel = np.exp(-im2pi * kernel)
+        n_items = int(n_items)
+        ups_size = cp.asarray(ups_size, dtype=cp.float64)
+        ax_offset = cp.asarray(ax_offset, dtype=cp.float64)
+        kernel = ((cp.arange(ups_size) - ax_offset)[:, None]
+                  * cp.fft.fftfreq(n_items, upsample_factor))
+        kernel = cp.exp(-im2pi * kernel)
 
         # Equivalent to:
         #   data[i, j, k] = kernel[i, :] @ data[j, k].T
-        data = np.tensordot(kernel, data, axes=(1, -1))
+        data = cp.tensordot(kernel, data, axes=(1, -1))
     return data
 
 
@@ -216,19 +221,19 @@ def phase_cross_correlation(reference_images, moving_images, *,
     shape = src_freqs.shape
     image_product = src_freqs * target_freqs.conj()
     cross_correlation = fft.ifftn(image_product,axes=(1,2))
-
+    cross_correlation_abs = cp.abs(cross_correlation)
     shifts = cp.zeros((2,reference_images.shape[0]))
-
     # Locate maximum
     for m in range(reference_images.shape[0]):
+        shiftsm = shifts[:,m]
         shapem = src_freqs[m].shape
-        ccm = cross_correlation[m]
-        maxima = cp.unravel_index(cp.argmax(cp.abs(ccm)),
-                                  ccm.shape)
-        midpoints = cp.array([cp.fix(axis_size / 2) for axis_size in shapem])
-
-        shiftsm = cp.stack(maxima).astype(cp.float64)
+        ipm = image_product[m]
+        maxima = np.unravel_index(np.argmax(cross_correlation_abs[m]),
+                                  cross_correlation_abs[m].shape)
         
+        midpoints = cp.array([cp.fix(axis_size / 2) for axis_size in shapem])
+        shiftsm = cp.stack(maxima).astype(cp.float64)
+    
         shiftsm[shiftsm > midpoints] -= cp.array(shapem)[shiftsm > midpoints]
 
         if upsample_factor == 1:
@@ -237,40 +242,35 @@ def phase_cross_correlation(reference_images, moving_images, *,
                 src_amp /= src_freqs.size
                 target_amp = cp.sum(cp.real(target_freqs[m] * target_freqs[m].conj()))
                 target_amp /= target_freqs.size
-                CCmax = ccm[maxima]
+                CCmax = cross_correlation[m][maxima]
         # If upsampling > 1, then refine estimate with matrix multiply DFT
+            return shiftsm
         else:
             # Initial shift estimate in upsampled grid
-            shiftsm = cp.round(shiftsm * upsample_factor) / upsample_factor
-            upsampled_region_size = cp.ceil(upsample_factor * 1.5)
+            shifts = np.round(shifts * upsample_factor) / upsample_factor
+            upsampled_region_size = int(cp.ceil(upsample_factor * 1.5))
             # Center of output array at dftshift + 1
             dftshift = cp.fix(upsampled_region_size / 2.0)
-            upsample_factor = cp.array(upsample_factor, dtype=cp.float64)
+            upsample_factor = cp.array(upsample_factor, dtype=np.float64)
             # Matrix multiply DFT around the current shift estimate
             sample_region_offset = dftshift - shiftsm*upsample_factor
-            cross_correlation = _upsampled_dft(image_product.conj(),
+            cross_correlation_new = _upsampled_dft(image_product[m].conj(),
                                                upsampled_region_size,
                                                upsample_factor,
                                                sample_region_offset).conj()
             # Locate maximum and map back to original pixel grid
-            maxima = cp.unravel_index(cp.argmax(cp.abs(cross_correlation)),
-                                      cross_correlation.shapem)
-            CCmax = cross_correlation[maxima]
-
+            maxima = cp.unravel_index(cp.argmax(cp.abs(cross_correlation_new)),
+                                      cross_correlation_new.shape)
+            CCmax = cross_correlation_new[maxima]
             maxima = cp.stack(maxima).astype(cp.float64) - dftshift
-
             shiftsm = shiftsm + maxima / upsample_factor
-
+            return_error=False
+            shifts[:,m] = shiftsm
+    
             if return_error:
-                src_amp = cp.sum(cp.real(src_freqs * src_freqs.conj()))
-                target_amp = cp.sum(cp.real(target_freqs * target_freqs.conj()))
+                src_amp = np.sum(np.real(src_freq * src_freq.conj()))
+                target_amp = np.sum(np.real(target_freq * target_freq.conj()))
 
-        # If its only one row or column the shift along that dimension has no
-        # effect. We set to zero.
-        #for dim in range(src_freqs[m].ndim):
-        #    if shapem[dim] == 1:
-        #        shifts[dim] = 0
-        shifts[:,m] = shiftsm
     if return_error:
         # Redirect user to masked_phase_cross_correlation if NaNs are observed
         if cp.isnan(CCmax) or cp.isnan(src_amp) or cp.isnan(target_amp):

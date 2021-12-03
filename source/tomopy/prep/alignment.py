@@ -398,7 +398,7 @@ def align_joint_astra_cupy2(
     debug=True,
     batchsize=10,
 ):
-    """
+    """ 
     EXPERIMENTAL
     TODO: CLEAN
     Aligns the projection image stack using the joint

@@ -17,7 +17,7 @@ import dxchange
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-import tomopy
+from tomopy.sim.project import angles as angle_maker
 import smtplib
 import time
 import os
@@ -28,6 +28,7 @@ from matplotlib.widgets import Slider
 
 
 # ----------------------------- Class TomoData -------------------------#
+
 
 class TomoData:
     def __init__(
@@ -40,9 +41,8 @@ class TomoData:
         theta=None,
         cbarRange=[0, 1],
         verbose_import=False,
-        #rotate="Y",
         metadata=None
-        #correctionOptions=dict(),
+        # correctionOptions=dict(),
     ):
 
         self.prj_imgs = prj_imgs
@@ -61,23 +61,22 @@ class TomoData:
             logging.getLogger("dxchange").setLevel(logging.WARNING)
 
         if self.metadata is not None and self.prj_imgs is None:
-            if metadata['imgtype'] == 'tiff':
+            if metadata["imgtype"] == "tiff":
                 self = self.import_tiff(filename)
-            if metadata['imgtype'] == 'tiff stack':
+            if metadata["imgtype"] == "tiff stack":
                 self = self.import_tiff_stack(filename)
 
         if self.prj_imgs is not None:
             self.num_theta, self.numY, self.numX = self.prj_imgs.shape
-        # can probably fix this later to rely on user input. Right now user 
+        # can probably fix this later to rely on user input. Right now user
         # input is only for storing metadata, maybe better that way.
         if self.theta is None and self.num_theta is not None:
-            self.theta = tomopy.angles(self.num_theta, 
-                self.metadata['start_angle'],
-                self.metadata['end_angle'])
+            self.theta = angle_maker(
+                self.num_theta, self.metadata["start_angle"], self.metadata["end_angle"]
+            )
 
         if self.prj_imgs is None:
-            logging.warning('This did not import.')
-
+            logging.warning("This did not import.")
 
     # --------------------------Import Functions--------------------------#
 
@@ -90,15 +89,15 @@ class TomoData:
         self : TomoData
         """
         # navigates to path selected. User may pick a file instead of a folder.
-        os.chdir(self.metadata['fpath'])
-        self.prj_imgs = dxchange.reader.read_tiff(
-            self.metadata['fname']
-            ).astype(np.float32)
+        os.chdir(self.metadata["fpath"])
+        self.prj_imgs = dxchange.reader.read_tiff(self.metadata["fname"]).astype(
+            np.float32
+        )
         if self.prj_imgs.ndim == 2:
             self.prj_imgs = self.prj_imgs[np.newaxis, :, :]
-        # this will rotate it 90 degrees. Can update to rotate it multiple 
+        # this will rotate it 90 degrees. Can update to rotate it multiple
         # times.
-        if self.metadata['opts']['rotate'] == True:
+        if self.metadata["opts"]["rotate"] == True:
             self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
             self.prj_imgs = np.flip(self.prj_imgs, 2)
         return self
@@ -118,9 +117,9 @@ class TomoData:
         self : TomoData
         """
         # navigates to path selected. User may pick a file instead of a folder.
-        # This should not matter, it ignores that. 
-        os.chdir(self.metadata['fpath'])
-        # Using tiffsequence instead of dxchange. dxchange.read_tiff_stack 
+        # This should not matter, it ignores that.
+        os.chdir(self.metadata["fpath"])
+        # Using tiffsequence instead of dxchange. dxchange.read_tiff_stack
         # does not do a good job finding files if they do not have a number
         # at the end.
 
@@ -130,12 +129,12 @@ class TomoData:
         image_sequence.close()
 
         # rotate dataset 90 deg if wanted
-        if self.metadata['opts']['rotate'] == True:
+        if self.metadata["opts"]["rotate"] == True:
             self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
             self.prj_imgs = np.flip(self.prj_imgs, 2)
 
-        #prj_imgs = dxchange.reader.read_tiff_stack(filename, list(range(self.num_theta)))
-        #prj_imgs = prj_imgs.astype(np.float32)
+        # prj_imgs = dxchange.reader.read_tiff_stack(filename, list(range(self.num_theta)))
+        # prj_imgs = prj_imgs.astype(np.float32)
         return self
 
     # --------------------------Plotting Functions----------------------#
@@ -264,7 +263,7 @@ class TomoData:
             must be from startNo to the total number of Y pixels.
         skipFrames : int
             number of frames you would like to skip. Increase
-            this value for large datasets. 
+            this value for large datasets.
         saveMovie : 'Y', optional
             Saves movie to 'movie.mp4' (do not know if functional).
         figSize : (int, int)
@@ -375,10 +374,11 @@ class TomoData:
 
 ############################# TomoDataCombined #############################
 
+
 def normalize(tomo, flat, dark, rmZerosAndNans=True):
     """
     Normalizes the data with typical options for normalization. TODO: Needs
-    more options. 
+    more options.
     TODO: add option to delete the previous objects from memory.
 
     Parameters
@@ -393,9 +393,7 @@ def normalize(tomo, flat, dark, rmZerosAndNans=True):
     tomoNormMLog : TomoData
         Normalized + -log() data in TomoData object
     """
-    tomoNormprj_imgs = tomopy.normalize(
-        tomo.prj_imgs, flat.prj_imgs, dark.prj_imgs
-    )
+    tomoNormprj_imgs = tomopy.normalize(tomo.prj_imgs, flat.prj_imgs, dark.prj_imgs)
     tomoNorm = TomoData(prj_imgs=tomoNormprj_imgs, raw="No")
     tomoNormMLogprj_imgs = tomopy.minus_log(tomoNormprj_imgs)
     tomoNormMLog = TomoData(prj_imgs=tomoNormMLogprj_imgs, raw="No")
@@ -408,6 +406,9 @@ def normalize(tomo, flat, dark, rmZerosAndNans=True):
 
 
 ################################### Recon ###################################
+
+################################### Recon ###################################
+
 
 class Recon:
     """
@@ -432,10 +433,10 @@ class Recon:
         alignment_time=dict(),
         recon_time=dict(),
         cbarRange=[0, 1],
-        sx = None,
-        sy = None,
-        prjRangeX = None,
-        prjRangeY = None   
+        sx=None,
+        sy=None,
+        prjRangeX=None,
+        prjRangeY=None,
     ):
         self.tomo = tomo  # tomodata object
         self.recon = recon
@@ -519,7 +520,11 @@ class Recon:
             )
         elif self.prjRangeX is not None and self.prjRangeY is not None:
             self.recon = tomopy.recon(
-                self.tomo.prj_imgs[:, self.prjRangeY[0] : self.prjRangeY[1] : 1, self.prjRangeX[0] : self.prjRangeX[1] : 1],
+                self.tomo.prj_imgs[
+                    :,
+                    self.prjRangeY[0] : self.prjRangeY[1] : 1,
+                    self.prjRangeX[0] : self.prjRangeX[1] : 1,
+                ],
                 self.tomo.theta,
                 algorithm=tomopy.astra,
                 options=options,
@@ -537,72 +542,6 @@ class Recon:
         self.options = options
 
     # ----------------------------Astra with Cupy-----------------------------#
-
-    def align_and_reconstruct(
-        self,
-        options={
-            "proj_type": "cuda",
-            "method": "SIRT_CUDA",
-            "ncore": 1,
-            "extra_options": {"MinConstraint": 0},
-            "iters_alignment": 50,
-            "iters_reconstruction": 50,
-            "upsample_factor": 1,
-            "batchsize": 5,
-            "pad": (10,10)
-        },
-    ):
-        """
-        Reconstructs projection images after creating a Recon object.
-        Uses the Astra toolbox to do the reconstruction.
-        Puts the reconstructed dataset into self.recon.
-
-        Parameters
-        ----------
-        options : dict
-            Dictionary format typically used to specify options in tomopy, see
-            LINK TO DESCRIPTION OF OPTIONS.
-
-        """
-
-        import astra
-
-        os.environ["TOMOPY_PYTHON_THREADS"] = "1"
-        if "center" in options:
-            self.center = options["center"]
-        else:
-            options["center"] = self.center
-
-        print(
-            "Running joint alignment using",
-            str(options["method"]),
-            "for",
-            str(options["iters_alignment"]),
-            "iterations.",
-        )
-
-        if "extra_options" in options:
-            print("Extra options: " + str(options["extra_options"]))
-        tic = time.perf_counter()
-        prj, self.sx, self.sy, conv, center, sim, self.recon = tomopy.prep.alignment.align_joint_astra_cupy2(
-            self.tomo.prj_imgs, 
-            self.tomo.theta,         
-            pad=options["pad"], 
-            iters=options["iters_alignment"],
-            upsample_factor=options["upsample_factor"], 
-            batchsize=options["batchsize"])
-        toc = time.perf_counter()
-
-        self.recon_time = {
-            "seconds": tic - toc,
-            "minutes": (tic - toc) / 60,
-            "hours": (tic - toc) / 3600,
-        }
-
-        self.recon = tomopy.circ_mask(self.recon, 0)
-        self.numSlices, self.numY, self.numX = self.recon.shape
-        self.options = options
-        return prj, conv, sim
 
     # --------------------------Tomopy Reconstruction----------------------#
 
@@ -727,7 +666,7 @@ class Recon:
             must be from startNo to the total number of Y pixels.
         skipFrames : int, optional
             number of frames you would like to skip. Increase
-            this value for large datasets. 
+            this value for large datasets.
         saveMovie : 'Y', optional
             Saves movie to 'movie.mp4' TODO: make naming file possible.
         figSize : (int, int)

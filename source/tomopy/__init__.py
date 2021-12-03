@@ -60,21 +60,21 @@ except DistributionNotFound:
     pass
 
 from ._fft_loader import fft_impl
-from tomopy.data.tomodata import *
-from tomopy.misc.corr import *
-from tomopy.misc.morph import *
-from tomopy.misc.phantom import *
-from tomopy.prep.alignment import *
-from tomopy.prep.normalize import *
-from tomopy.prep.phase import *
-from tomopy.prep.stripe import *
-from tomopy.recon.wrappers import *
-from tomopy.recon.algorithm import *
-from tomopy.recon.rotation import *
-from tomopy.recon.vector import *
-from tomopy.recon.acceleration import *
-from tomopy.sim.project import *
-from tomopy.sim.propagate import *
+# from tomopy.data.tomodata import *
+# from tomopy.misc.corr import *
+# from tomopy.misc.morph import *
+# from tomopy.misc.phantom import *
+# from tomopy.prep.alignment import *
+# from tomopy.prep.normalize import *
+# from tomopy.prep.phase import *
+# from tomopy.prep.stripe import *
+# from tomopy.recon.wrappers import *
+# from tomopy.recon.algorithm import *
+# from tomopy.recon.rotation import *
+# from tomopy.recon.vector import *
+# from tomopy.recon.acceleration import *
+# from tomopy.sim.project import *
+# from tomopy.sim.propagate import *
 from tomopy.util.mproc import set_debug
 
 import logging
