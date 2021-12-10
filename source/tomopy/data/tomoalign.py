@@ -13,6 +13,7 @@ from tomopy.recon import algorithm
 from skimage.transform import rescale
 from tomopy.misc.corr import circ_mask
 from copy import deepcopy, copy
+from tomopy.recon.rotation import find_center, find_center_vo
 
 import tomopy.data.tomodata as td
 import matplotlib.pyplot as plt
@@ -50,6 +51,7 @@ class TomoAlign:
         sx=None,
         sy=None,
         recon=None,
+        callbacks=None
     ):
 
         self.tomo = tomo  # tomodata object
@@ -65,17 +67,17 @@ class TomoAlign:
         self.alignment_wd_child = alignment_wd_child
 
         # setting up output callback context managers
-        if "callbacks" in metadata:
-            if "methodoutput" in metadata["callbacks"]:
-                self.method_bar_cm = metadata["callbacks"]["methodoutput"]
+        if callbacks is not None:
+            if "methodoutput" in callbacks:
+                self.method_bar_cm = callbacks["methodoutput"]
             else:
                 self.method_bar_cm = nullcontext()
-            if "output1" in metadata["callbacks"]:
-                self.output1_cm = metadata["callbacks"]["output1"]
+            if "output1" in callbacks:
+                self.output1_cm = callbacks["output1"]
             else:
                 self.output1_cm = nullcontext()
-            if "output2" in metadata["callbacks"]:
-                self.output2_cm = metadata["callbacks"]["output2"]
+            if "output2" in callbacks:
+                self.output2_cm = callbacks["output2"]
             else:
                 self.output2_cm = nullcontext()
         else:
@@ -118,7 +120,7 @@ class TomoAlign:
             metadata_list.append(_metadata)
 
         for metadata in metadata_list:
-            self.metadata["callbacks"]["button"].description = (
+            self.callbacks["button"].description = (
                 "Starting" + " " + list(metadata["methods"].keys())[0]
             )
             self.__init__(self.tomo, metadata, alignment_wd=self.alignment_wd)
@@ -232,6 +234,7 @@ class TomoAlign:
 
         # pad sample after downsampling. this avoid uncessary allocation of 
         # memory to an already-large array if downsampled.
+
         if downsample:
             downsample_factor = self.metadata["opts"]["downsample_factor"]
 
@@ -242,12 +245,19 @@ class TomoAlign:
                 anti_aliasing=True,
             )
 
+            #!!!!!!!!!!!! TODO: add option for finding center or specifying
+            center = find_center_vo(self.prj_aligned)
+            print("found center with vo")
+            print(center)
             # add downsampled padding to the edges of the sample
             pad_ds = tuple([int(downsample_factor*x) for x in pad])
+            center = center + pad_ds[0]
             self.prj_aligned, pad_ds = pad_projections(self.prj_aligned, pad_ds, 1)
         else:
             downsample_factor = 1
             pad_ds = pad
+            center = 197
+            center = center + pad_ds[0]
             self.prj_aligned, pad_ds = pad_projections(self.prj_aligned, pad_ds, 1)
             
         # Initialization of reconstruction dataset
@@ -256,22 +266,14 @@ class TomoAlign:
             (tomo_shape[1], tomo_shape[2], tomo_shape[2]), dtype=np.float32
         )
 
-        # Options go into kwargs which go into recon()
-        kwargs = {}
-        options = {
-            "proj_type": "cuda",
-            "method": method_str,
-            "num_iter": 1,
-        }
-        kwargs["options"] = options
 
         # add progress bar for method. roughly a full-loop progress bar.
-        with self.method_bar_cm:
-            method_bar = tqdm(
-                total=num_iter,
-                desc=options["method"],
-                display=True,
-            )
+        # with self.method_bar_cm:
+        #     method_bar = tqdm(
+        #         total=num_iter,
+        #         desc=options["method"],
+        #         display=True,
+        #     )
 
         # Initialize shift arrays
         self.sx = np.zeros((init_tomo_shape[0]))
@@ -280,23 +282,35 @@ class TomoAlign:
 
         # start iterative alignment
         for n in range(num_iter):
-            if np.mod(n, 1) == 0:
-                _rec = self.recon
+
+            _rec = self.recon
+
             if self.metadata["methods"]["SIRT_CUDA"]["Faster"] == True:
-                self.recon = self.recon_sirt_3D(self.prj_aligned)
+                self.recon = self.recon_sirt_3D(self.prj_aligned, center=center)
             elif self.metadata["methods"]["SIRT_CUDA"]["Fastest"] == True:
-                self.recon = self.recon_sirt_3D_allgpu(self.prj_aligned)
+                self.recon = self.recon_sirt_3D_allgpu(self.prj_aligned, _rec, center=center)
             else:
-                self.recon = tomopy.recon(
+
+                # Options go into kwargs which go into recon()
+                kwargs = {}
+                options = {
+                    "proj_type": "cuda",
+                    "method": method_str,
+                    "num_iter": 1
+                    }
+                kwargs["options"] = options
+
+                self.recon = algorithm.recon(
                     self.prj_aligned,
                     self.tomo.theta,
                     algorithm=wrappers.astra,
                     init_recon=_rec,
+                    center=center,
                     ncore=None,
                     **kwargs,
                 )
             # update progress bar
-            method_bar.update()
+            # method_bar.update()
 
             # break up reconstruction into batches along z axis
             self.recon = np.array_split(self.recon, num_batches, axis=0)
@@ -312,8 +326,8 @@ class TomoAlign:
             
             with self.output1_cm:
                 self.output1_cm.clear_output()
-                simulate_projections(_rec, sim, self.tomo.theta)
-                del _rec
+                simulate_projections(_rec, sim, center, self.tomo.theta)
+                # del _rec
                 sim = np.concatenate(sim, axis=1)
 
                 # only flip the simulated datasets if using normal tomopy algorithm
@@ -328,13 +342,25 @@ class TomoAlign:
                 shift_cpu = []
                 batch_cross_correlation(self.prj_aligned, 
                     sim, shift_cpu,
-                    num_batches, upsample_factor, subset_correlation=False, blur=True, pad=pad_ds)
+                    num_batches, upsample_factor, subset_correlation=False, blur=False, pad=pad_ds)
                 self.shift = np.concatenate(shift_cpu, axis=1)
 
                 # Shifting 
-                self.prj_aligned, self.sx, self.sy, self.shift, err, pad_ds = warp_prj_shift_cp(
-                    self.prj_aligned, self.sx, self.sy, self.shift, num_batches,
-                    pad_ds, downsample_factor   
+                (self.prj_aligned, 
+                self.sx, 
+                self.sy, 
+                self.shift, 
+                err, 
+                pad_ds, 
+                center) = warp_prj_shift_cp(
+                    self.prj_aligned, 
+                    self.sx, 
+                    self.sy, 
+                    self.shift, 
+                    num_batches,
+                    pad_ds,
+                    center, 
+                    downsample_factor=downsample_factor   
                 )
                 self.conv[n] = np.linalg.norm(err)
             with self.output2_cm:
@@ -342,11 +368,14 @@ class TomoAlign:
                 self.plotIm(sim)
                 self.plotSxSy(downsample_factor)
                 print(f"Error = {np.linalg.norm(err):3.3f}.")
-                
 
-        self.recon = np.concatenate(self.recon, axis=0)
+            self.recon = np.concatenate(self.recon, axis=0)
+            mempool = cp.get_default_memory_pool()
+            mempool.free_all_blocks()
+
+        # self.recon = np.concatenate(self.recon, axis=0)
         # Re-normalize data
-        method_bar.close()
+        # method_bar.close()
         self.prj_aligned *= scl
         self.recon = circ_mask(self.recon, 0)
         if downsample:
@@ -390,7 +419,7 @@ class TomoAlign:
         ax2.set(xlabel= "Projection number",ylabel="Pixel shift (not downsampled)")
         plt.show()
 
-    def recon_sirt_3D(self, prj):
+    def recon_sirt_3D(self, prj, center):
         # Init tomo in sinogram order
         sinograms = algorithm.init_tomo(prj, 0)
         num_proj = sinograms.shape[1]
@@ -399,14 +428,17 @@ class TomoAlign:
         # assume angles used are the same as parent tomography
         angles = self.tomo.theta
         proj_geom = astra.create_proj_geom("parallel3d", 1, 1, num_y, num_x, angles)
+        if center is not None:
+            center_shift = -(center - num_x/2)
+            proj_geom = astra.geom_postalignment(proj_geom, (center_shift,))
         vol_geom = astra.create_vol_geom(num_x, num_x, num_y)
         projector = astra.create_projector("cuda3d", proj_geom, vol_geom)
         astra.plugin.register(astra.plugins.SIRTPlugin)
         W = astra.OpTomo(projector)
-        rec_sirt = W.reconstruct("SIRT-PLUGIN", sinograms, 1)
+        rec_sirt = W.reconstruct("SIRT-PLUGIN", sinograms, self.metadata["opts"]["num_iter"])
         return rec_sirt
 
-    def recon_sirt_3D_allgpu(self, prj):
+    def recon_sirt_3D_allgpu(self, prj, rec, center=None):
         # Init tomo in sinogram order
         sinograms = algorithm.init_tomo(prj, 0)
         num_proj = sinograms.shape[1]
@@ -416,9 +448,14 @@ class TomoAlign:
         angles = self.tomo.theta
         # create projection geometry with shape of 
         proj_geom = astra.create_proj_geom("parallel3d", 1, 1, num_y, num_x, angles)
+        # shifts the projection geometry so that it will reconstruct using the 
+        # correct center.
+        if center is not None:
+            center_shift = -(center - num_x/2)
+            proj_geom = astra.geom_postalignment(proj_geom, (center_shift,))
         vol_geom = astra.create_vol_geom(num_x, num_x, num_y)
         sinograms_id = astra.data3d.create("-sino", proj_geom, sinograms)
-        rec_id = astra.data3d.create("-vol", vol_geom)
+        rec_id = astra.data3d.create("-vol", vol_geom, rec)
         reco_alg = "SIRT3D_CUDA"
         cfg = astra.astra_dict(reco_alg)
         cfg["ProjectionDataId"] = sinograms_id
@@ -465,7 +502,8 @@ def transform_parallel(prj, sx, sy, shift, metadata):
 
     Parallel(n_jobs=-1, require="sharedmem")(
         delayed(transform_algorithm)(prj, shift, sx, sy, m)
-        for m in tnrange(num_theta, desc="Transformation", leave=True)
+        for m in range(num_theta)
+        # for m in tnrange(num_theta, desc="Transformation", leave=True)
     )
     return prj, sx, sy, err
 
@@ -497,7 +535,8 @@ def warp_projections(prj, sx, sy, metadata):
 
     Parallel(n_jobs=-1, require="sharedmem")(
         delayed(transform_algorithm_warponly)(prj, sx, sy, m)
-        for m in tnrange(num_theta, desc="Transformation", leave=True)
+        for m in range(num_theta)
+        # for m in tnrange(num_theta, desc="Transformation", leave=True)
     )
     return prj
 
@@ -518,7 +557,7 @@ def init_new_from_prior(prior_tomoalign, metadata):
 
 def trim_padding(prj):
     # https://stackoverflow.com/questions/54567986/python-numpy-remove-empty-zeroes-border-of-3d-array
-    xs, ys, zs = np.where(prj != 0)
+    xs, ys, zs = np.where(prj > 1e-7)
 
     minxs = np.min(xs)
     maxxs = np.max(xs)
@@ -533,8 +572,10 @@ def trim_padding(prj):
 
     return result
 
-def simulate_projections(rec, sim, theta):
-    for batch in tnrange(len(rec), desc="Re-projection", leave=True):
+
+def simulate_projections(rec, sim, center, theta):
+    for batch in range(len(rec)):
+    # for batch in tnrange(len(rec), desc="Re-projection", leave=True):
         _rec = rec[batch]
         vol_geom = astra.create_vol_geom(
             _rec.shape[1], _rec.shape[1], _rec.shape[0]
@@ -548,6 +589,9 @@ def simulate_projections(rec, sim, theta):
             _rec.shape[1],
             theta,
         )
+        if center is not None:
+            center_shift = -(center - _rec.shape[1]/2)
+            proj_geom = astra.geom_postalignment(proj_geom, (center_shift,))
         projections_id, _sim = astra.creators.create_sino3d_gpu(
             phantom_id, proj_geom, vol_geom
         )
@@ -568,7 +612,8 @@ def batch_cross_correlation(prj, sim, shift_cpu, num_batches, upsample_factor,
     # split into arrays for batch.
     _prj = np.array_split(prj, num_batches, axis=0)
     _sim = np.array_split(sim, num_batches, axis=0)
-    for batch in tnrange(len(_prj), desc="Cross-correlation", leave=True):
+    for batch in range(len(_prj)):
+    # for batch in tnrange(len(_prj), desc="Cross-correlation", leave=True):
         # projection images have been shifted. mask also shifts.
         # apply the "moving" mask to the simulated projections
         # simulated projections have data outside of the mask.
@@ -594,18 +639,15 @@ def batch_cross_correlation(prj, sim, shift_cpu, num_batches, upsample_factor,
             _sim_gpu = cp.array(_sim[batch], dtype=cp.float32)
 
         if mask_sim:
-            _sim_gpu = cp.where(_prj_gpu == 0, 0, _sim_gpu)
+            _sim_gpu = cp.where(_prj_gpu < 1e-7, 0, _sim_gpu)
 
         if blur:
             _prj_gpu = blur_edges_cp(_prj_gpu, rin, rout)
             _sim_gpu = blur_edges_cp(_sim_gpu, rin, rout)
-        else:
-            _prj_gpu = _prj[batch]
-            _sim_gpu = _sim[batch]
 
         # e.g. lets say sim is (-50, 0) wrt prj. This would correspond to
         # a shift of [+50, 0]
-        # In the warping section, we have to now warp prj by (+50, 0), so the 
+        # In the warping section, we have to now warp prj by (-50, 0), so the 
         # SAME sign of the shift value given here.
         shift_gpu = phase_cross_correlation(
             _sim_gpu,
@@ -614,7 +656,7 @@ def batch_cross_correlation(prj, sim, shift_cpu, num_batches, upsample_factor,
             return_error=False,
         )
         shift_cpu.append(cp.asnumpy(shift_gpu))
-    shift_cpu = np.concatenate(shift_cpu, axis=1)
+    # shift_cpu = np.concatenate(shift_cpu, axis=1)
 
 def blur_edges_cp(prj, low=0, high=0.8):
     """
@@ -655,7 +697,7 @@ def blur_edges_cp(prj, low=0, high=0.8):
 
 
 
-def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad, 
+def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad, center, 
     downsample_factor=1, smart_shift=True, smart_pad=True):
     # Why is the error calculated in such a strange way?
     # Will use the standard used in tomopy here, but think of different way to
@@ -673,7 +715,7 @@ def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad,
         cond4 = np.absolute(sy.min()) > 0.95*pad[1]
         if cond1 or cond2 or cond3 or cond4:
             print("applying smart shift")
-            print(f"sx max: {sx.max()}")
+            print(f"sx max: {sx.max()}")    
             print(f"sx min: {sx.min()}")
             average_sx = (sx.max() + sx.min())/2
             average_sy = (sy.max() + sy.min())/2
@@ -683,13 +725,14 @@ def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad,
             sy -= sy_smart_shift
             print(f"sx max after shift: {sx.max()}")
             print(f"sx min after shift: {sx.min()}")
-            
+            center = center + average_sx
             if smart_pad:
-                if average_sx < 1:
+                if average_sx < 1 and cond1 and cond3:
                     extra_pad = tuple([0.2*pad[0], 0])
+                    center = center + extra_pad[0]
                     pad = np.array(extra_pad) + np.array(pad)
                     prj, extra_pad = pad_projections(prj, extra_pad, 1)
-                if average_sy < 1:
+                if average_sy < 1 and cond2 and cond4:
                     extra_pad = tuple([0, 0.2*pad[1]])
                     pad = np.array(extra_pad) + np.array(pad)
                     prj, extra_pad = pad_projections(prj, extra_pad, 1)
@@ -708,8 +751,8 @@ def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad,
     sy = np.array_split(sy, num_batches, axis=0)
     shift = np.array_split(shift, num_batches, axis=1)
     shifted_bool = np.array_split(shifted_bool, num_batches, axis=0)
-
-    for batch in tnrange(len(prj_cpu), desc="Shifting", leave=True):
+    for batch in range(len(prj_cpu)):
+    # for batch in tnrange(len(prj_cpu), desc="Shifting", leave=True):
         _prj_gpu = cp.array(prj_cpu[batch], dtype=cp.float32)
 
         for image in range(_prj_gpu.shape[0]):
@@ -734,20 +777,21 @@ def warp_prj_shift_cp(prj, sx, sy, shift, num_batches, pad,
         prj_cpu[batch] = cp.asnumpy(_prj_gpu)
 
     # concatenate the final list and return
-    prj_cpu = np.concatenate(np.array(prj_cpu), axis=0)
+    prj_cpu = np.concatenate(prj_cpu, axis=0)
     err = np.concatenate(err)
     shifted_bool = np.concatenate(shifted_bool)
-    sx = np.concatenate(np.array(sx), axis=0)
-    sy = np.concatenate(np.array(sy), axis=0)
-    shift = np.concatenate(np.array(shift), axis=1)
-    return prj_cpu, sx, sy, shift, err, pad
+    sx = np.concatenate(sx, axis=0)
+    sy = np.concatenate(sy, axis=0)
+    shift = np.concatenate(shift, axis=1)
+    return prj_cpu, sx, sy, shift, err, pad, center
 
 def warp_prj_cp(prj, sx, sy, num_batches, pad, use_corr_prj_gpu=False):
     # add checks for sx, sy having the same dimension as prj
     prj_cpu = np.array_split(prj, num_batches, axis=0)
     _sx = np.array_split(sx, num_batches, axis=0)
     _sy = np.array_split(sy, num_batches, axis=0)
-    for batch in tnrange(len(prj_cpu), desc="Shifting", leave=True):
+    for batch in range(len(prj_cpu)):
+    # for batch in tnrange(len(prj_cpu), desc="Shifting", leave=True):
         _prj_gpu = cp.array(prj_cpu[batch], dtype=cp.float32)
         num_theta = _prj_gpu.shape[0]
         shift_y_condition = (
@@ -764,9 +808,9 @@ def warp_prj_cp(prj, sx, sy, num_batches, pad, use_corr_prj_gpu=False):
             ):
                 shift_tuple = (_sy[batch][image], _sx[batch][image])
                 _prj_gpu[image] = ndi_cp.shift(_prj_gpu[image], shift_tuple, order=5)
-        prj_cpu[batch] = cp.asnumpy(_prj_gpu)
 
-    prj_cpu = np.concatenate(np.array(prj_cpu), axis=0)
+        prj_cpu[batch] = cp.asnumpy(_prj_gpu)
+    prj_cpu = np.concatenate(prj_cpu, axis=0)
     return prj_cpu
 
 # warning I don't think I fixed sign convention here.
@@ -803,7 +847,8 @@ def transform_parallel(prj, sx, sy, shift, metadata):
 
     Parallel(n_jobs=-1, require="sharedmem")(
         delayed(transform_algorithm)(prj, shift, sx, sy, m)
-        for m in tnrange(num_theta, desc="Transformation", leave=True)
+        for m in range(num_theta)
+        # for m in tnrange(num_theta, desc="Transformation", leave=True)
     )
     return prj, sx, sy, err
 

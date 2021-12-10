@@ -37,7 +37,7 @@ def return_handler(logger, logging_level=None):
     handler.setFormatter(
         logging.Formatter("%(asctime)s  - [%(levelname)s] %(message)s")
     )
-    #handler.show_logs()
+    # handler.show_logs()
     logger.addHandler(handler)
     logger.setLevel(logging_level)  # log at info level.
     return handler, logger

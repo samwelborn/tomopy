@@ -77,7 +77,7 @@ def plot_imported_data(tomodata, widget_linker):
         plot_output.clear_output()
         with plot_output:
             update_plot_button.button_style = "info"
-            update_plot_button.icon = "gear"
+            update_plot_button.icon = "fas fa-cog fa-spin fa-lg"
             update_plot_button.description = "Making a plot."
             plot_projections(
                 tomodata,
@@ -95,7 +95,7 @@ def plot_imported_data(tomodata, widget_linker):
         movie_output.clear_output()
         with movie_output:
             create_movie_button.button_style = "info"
-            create_movie_button.icon = "gear"
+            create_movie_button.icon = "fas fa-cog fa-spin fa-lg"
             create_movie_button.description = "Making a movie."
             plot_projection_movie(
                 tomodata,

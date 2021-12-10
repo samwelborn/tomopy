@@ -1,3 +1,6 @@
+from ipywidgets import *
+import functools
+
 recon_grid = GridspecLayout(7, 4)
 
 FP_CUDA = Checkbox(description="FP_CUDA")
@@ -43,6 +46,7 @@ MLEM_CUDA_option_list = [MLEM_CUDA_option1, MLEM_CUDA_option2, MLEM_CUDA_option3
 
 method_list = [FP_CUDA, BP_CUDA, FBP_CUDA, SIRT_CUDA, SART_CUDA, CGLS_CUDA, MLEM_CUDA]
 
+
 def toggle_on(change, opt_list, dictname):
     if change.new == 1:
         reconmetadata[dictname] = {}
@@ -53,6 +57,7 @@ def toggle_on(change, opt_list, dictname):
         for option in opt_list:
             option.value = 0
             option.disabled = True
+
 
 FP_CUDA.observe(
     functools.partial(toggle_on, opt_list=FP_CUDA_option_list, dictname="FP_CUDA"),
@@ -206,4 +211,4 @@ fill_grid(MLEM_CUDA, MLEM_CUDA_option_list, 6, recon_grid)
 
 # FP_CUDA.observe(functools.partial(toggle_on, opt_list=FP_CUDA_option_list), names=['value'])
 
-recon_grid
+return recon_grid

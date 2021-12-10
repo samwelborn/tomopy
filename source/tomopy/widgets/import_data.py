@@ -7,6 +7,7 @@ import pdb
 default_generalmetadata = {"analysis_date": "20000101"}
 default_importmetadata = dict(tomo={}, flat={}, dark={})
 
+
 def create_import_box(
     importmetadata=default_importmetadata, generalmetadata=default_generalmetadata
 ):
@@ -67,7 +68,7 @@ def create_import_box(
         if self["owner"].description == "Dark Image Type:":
             importmetadata["dark"]["imgtype"] = self["new"]
 
-    radio_import_options = ["tiff", "tiff stack", "h5", "one image"]
+    radio_import_options = ["tiff", "tiff folder", "h5", "one image"]
 
     def create_filetype_radio(
         description, options=radio_import_options, value="tiff", disabled=False
@@ -110,7 +111,7 @@ def create_import_box(
         importmetadata[dictname]["opts"] = create_option_dictionary(opt_list)
 
     # create checkboxes for other import options
-    def create_import_option_radio(description, disabled=False, value=0):
+    def create_import_option_checkbox(description, disabled=False, value=0):
         checkbox = Checkbox(description=description, disabled=disabled, value=value)
         return checkbox
 
@@ -125,7 +126,7 @@ def create_import_box(
     for key in importmetadata:
         if key == "tomo":
             for opt in other_import_options:
-                tomo_import_other_options.append(create_import_option_radio(opt))
+                tomo_import_other_options.append(create_import_option_checkbox(opt))
             # make them clickable, creates dictionary when clicked
             [
                 opt.observe(
@@ -140,7 +141,7 @@ def create_import_box(
             ]
         if key == "flat":
             for opt in other_import_options:
-                flat_import_other_options.append(create_import_option_radio(opt))
+                flat_import_other_options.append(create_import_option_checkbox(opt))
             # make them clickable, creates dictionary when clicked
             [
                 opt.observe(
@@ -155,7 +156,7 @@ def create_import_box(
             ]
         if key == "dark":
             for opt in other_import_options:
-                dark_import_other_options.append(create_import_option_radio(opt))
+                dark_import_other_options.append(create_import_option_checkbox(opt))
             # make them clickable, creates dictionary when clicked
             [
                 opt.observe(
@@ -204,7 +205,7 @@ def create_import_box(
             self.tooltip = "Upload your datasets (tomo, dark, and flat chosen above)"
         elif self.button_style == "" or self.button_style == "warning":
             self.button_style = "info"
-            self.icon = "fa-gear"
+            self.icon = "fas fa-cog fa-spin fa-lg"
             self.description = "Uploading data."
             try:
                 datadict = {}

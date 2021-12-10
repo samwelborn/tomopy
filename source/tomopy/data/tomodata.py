@@ -22,6 +22,7 @@ import smtplib
 import time
 import os
 import tifffile as tf
+import glob
 
 from matplotlib import animation, rc, colors
 from matplotlib.widgets import Slider
@@ -41,10 +42,10 @@ class TomoData:
         theta=None,
         cbarRange=[0, 1],
         verbose_import=False,
-        metadata=None
+        metadata=None,
         # correctionOptions=dict(),
     ):
-
+        self.metadata = metadata
         self.prj_imgs = prj_imgs
         self.numX = numX
         self.numY = numY
@@ -52,7 +53,6 @@ class TomoData:
         self.theta = theta
         self.verbose_import = verbose_import
         self.filename = filename
-        self.metadata = metadata
         self.cbarRange = cbarRange
 
         if self.verbose_import == True:
@@ -61,10 +61,14 @@ class TomoData:
             logging.getLogger("dxchange").setLevel(logging.WARNING)
 
         if self.metadata is not None and self.prj_imgs is None:
-            if metadata["imgtype"] == "tiff":
-                self = self.import_tiff(filename)
-            if metadata["imgtype"] == "tiff stack":
-                self = self.import_tiff_stack(filename)
+            self.metadata["imgtype"] = ""
+            self.filetype_parser()
+            if self.metadata["imgtype"] == "tiff":
+                self = self.import_tiff()
+            if self.metadata["imgtype"] == "tiff folder":
+                self = self.import_tiff_folder()
+            if self.metadata["imgtype"] == "npy":
+                self = self.import_npy()
 
         if self.prj_imgs is not None:
             self.num_theta, self.numY, self.numX = self.prj_imgs.shape
@@ -79,6 +83,24 @@ class TomoData:
             logging.warning("This did not import.")
 
     # --------------------------Import Functions--------------------------#
+
+    def filetype_parser(self):
+        fpath = self.metadata["fpath"]
+        fname = self.metadata["fname"]
+        if fname == "":
+            self.metadata["imgtype"] = "tiff folder"
+        if fname.__contains__(".tif"):
+            # if there is a file name, checks to see if there are many more
+            # tiffs in the folder. If there are, will upload all of them.
+            tiff_count_in_folder = len(glob.glob1(fpath, "*.tif"))
+            if tiff_count_in_folder > 50:
+                self.metadata["imgtype"] = "tiff folder"
+            else:
+                self.metadata["imgtype"] = "tiff"
+        if fname.__contains__(".npy"):
+            self.metadata["imgtype"] = "npy"
+
+        return self
 
     def import_tiff(self):
         """
@@ -97,19 +119,19 @@ class TomoData:
             self.prj_imgs = self.prj_imgs[np.newaxis, :, :]
         # this will rotate it 90 degrees. Can update to rotate it multiple
         # times.
-        if self.metadata["opts"]["rotate"] == True:
-            self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
-            self.prj_imgs = np.flip(self.prj_imgs, 2)
+        if "opts" in self.metadata:
+            if "rotate" in self.metadata["opts"]:
+                if self.metadata["opts"]["rotate"]:
+                    self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
+                    self.prj_imgs = np.flip(self.prj_imgs, 2)
         return self
 
-    def import_tiff_stack(self, filename, num_theta=None):
+    def import_tiff_folder(self, num_theta=None):
         """
-        Import tiff stack (lots of files in one folder).
+        Import tiffs in a folder.
 
         Parameters
         ----------
-        filename : str of first file
-            Typically 0000, relative or absolute
         num_theta: int, required
             Total number of projection images taken.
         Returns
@@ -118,6 +140,7 @@ class TomoData:
         """
         # navigates to path selected. User may pick a file instead of a folder.
         # This should not matter, it ignores that.
+
         os.chdir(self.metadata["fpath"])
         # Using tiffsequence instead of dxchange. dxchange.read_tiff_stack
         # does not do a good job finding files if they do not have a number
@@ -127,14 +150,35 @@ class TomoData:
         self.num_theta = len(image_sequence.files)
         self.prj_imgs = image_sequence.asarray().astype(np.float32)
         image_sequence.close()
-
         # rotate dataset 90 deg if wanted
-        if self.metadata["opts"]["rotate"] == True:
-            self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
-            self.prj_imgs = np.flip(self.prj_imgs, 2)
+        if "opts" in self.metadata:
+            if "rotate" in self.metadata["opts"]:
+                if self.metadata["opts"]["rotate"]:
+                    self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
+                    self.prj_imgs = np.flip(self.prj_imgs, 2)
 
-        # prj_imgs = dxchange.reader.read_tiff_stack(filename, list(range(self.num_theta)))
-        # prj_imgs = prj_imgs.astype(np.float32)
+        return self
+
+    def import_npy(self):
+        """
+        Import tiff and create TomoData object based on option_dict.
+
+        Returns
+        -------
+        self : TomoData
+        """
+        # navigates to path selected. User may pick a file instead of a folder.
+        os.chdir(self.metadata["fpath"])
+        self.prj_imgs = np.load(self.metadata["fname"]).astype(np.float32)
+        if self.prj_imgs.ndim == 2:
+            self.prj_imgs = self.prj_imgs[np.newaxis, :, :]
+        # this will rotate it 90 degrees. Can update to rotate it multiple
+        # times.
+        if "opts" in self.metadata:
+            if "rotate" in self.metadata["opts"]:
+                if self.metadata["opts"]["rotate"]:
+                    self.prj_imgs = np.swapaxes(self.prj_imgs, 1, 2)
+                    self.prj_imgs = np.flip(self.prj_imgs, 2)
         return self
 
     # --------------------------Plotting Functions----------------------#
