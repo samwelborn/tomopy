@@ -8,12 +8,6 @@ import json
 
 def generate_recon_box(recon_tomo_metadata):
 
-    # Need
-    # 1. Do we want to reconstruct this one?
-    # 2. What plot range?
-    # 3. What methods?
-    # 4. Downsample?
-
     extend_description_style = {"description_width": "auto"}
     fpath = recon_tomo_metadata["fpath"]
     fname = recon_tomo_metadata["fname"]
